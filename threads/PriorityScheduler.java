@@ -214,10 +214,7 @@ public class PriorityScheduler extends Scheduler {
 		 */
 		public ThreadState(KThread thread) {
 		    this.thread = thread;
-		    if(thread.getName().equals("pedito"))
-		    	setPriority(4);
-		    else
-		    	setPriority(priorityDefault);
+		    setPriority(priorityDefault);
 		}
 
 		/**

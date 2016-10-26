@@ -466,10 +466,64 @@ public class KThread {
      */
     public static void selfTest() {
     	Lib.debug(dbgThread, "Enter KThread.selfTest"); 
-    	//prueba fase 1
     	KThread t1, t2, t3; 
 		final Lock lock; 
 		final Condition2 condition; 
+		//prueba fase 1 caso 1
+		System.out.println("Case 1:"); 
+		t1 = new KThread(new Runnable() { 
+				public void run() { 
+					System.out.println(KThread.currentThread().getName() + " started working"); 
+					for (int i = 0; i < 10; ++i) { 
+						System.out.println(KThread.currentThread().getName() + " working " + i); 
+						KThread.yield(); 
+					} 
+					System.out.println(KThread.currentThread().getName() + " finished working"); 
+				} 
+			}); 
+
+
+		t2 = new KThread(new Runnable() { 
+			public void run() { 
+				System.out.println(KThread.currentThread().getName() + " started working"); 
+				for (int i = 0; i < 10; ++i) { 
+					System.out.println(KThread.currentThread().getName() + " working " + i); 
+					KThread.yield(); 
+				} 
+				System.out.println(KThread.currentThread().getName() + " finished working"); 
+			} 
+		}); 
+		selfTestRun(t1, 7, t2, 4);
+		//prueba fase 1 caso 2
+		System.out.println("Case 2:"); 
+		t1 = new KThread(new Runnable() { 
+			public void run() { 
+				System.out.println(KThread.currentThread().getName() + " started working"); 
+				for (int i = 0; i < 10; ++i) { 
+					System.out.println(KThread.currentThread().getName() + " working " + i); 
+					KThread.yield(); 
+					if (i == 4) { 
+						System.out.println(KThread.currentThread().getName() + " reached 1/2 way, changing priority"); 
+						boolean int_state = Machine.interrupt().disable(); 
+						ThreadedKernel.scheduler.setPriority(2); 
+						Machine.interrupt().restore(int_state); 
+					} 
+				} 
+				System.out.println(KThread.currentThread().getName() + " finished working"); 
+			} 
+		}); 
+		t2 = new KThread(new Runnable() { 
+			public void run() { 
+				System.out.println(KThread.currentThread().getName() + " started working"); 
+				for (int i = 0; i < 10; ++i) { 
+					System.out.println(KThread.currentThread().getName() + " working " + i); 
+					KThread.yield(); 
+				} 
+				System.out.println(KThread.currentThread().getName() + " finished working"); 
+			} 
+		}); 
+		selfTestRun(t1, 7, t2, 4);  
+    	//prueba fase 1 inversion
     	System.out.println("Case 3:"); 
 		lock = new Lock(); 
 		condition = new Condition2(lock); 
@@ -513,8 +567,8 @@ public class KThread {
 		selfTestRun(t1, 6, t2, 4, t3, 7); 
 
 		//prueba de barquito
-		// Boat barquito = new Boat();
-		// barquito.selfTest();
+		Boat barquito = new Boat();
+		barquito.selfTest();
     	
     	//pruba de comunicator 
       	// Communicator com = new Communicator();
