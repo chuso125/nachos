@@ -15,6 +15,7 @@
 int
 main()
 {
+    creat("hola");
     halt();
     /* not reached */
 }

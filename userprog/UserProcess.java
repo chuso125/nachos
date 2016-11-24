@@ -22,7 +22,12 @@ public class UserProcess {
     /**
      * Allocate a new process.
      */
+    private OpenFile[] openFiles;
     public UserProcess() {
+        this.openFiles = new OpenFile[16];
+        this.openFiles[0] = UserKernel.console.openForReading();
+        this.openFiles[1] = UserKernel.console.openForWriting();
+
 	int numPhysPages = Machine.processor().getNumPhysPages();
 	pageTable = new TranslationEntry[numPhysPages];
 	for (int i=0; i<numPhysPages; i++)
@@ -334,8 +339,100 @@ public class UserProcess {
 	processor.writeRegister(Processor.regA0, argc);
 	processor.writeRegister(Processor.regA1, argv);
     }
+    private int getFreeSpace(){
+        for (int i = 0 ; i<this.openFiles.length ;i++ ) {
+            if(this.openFiles[i]== null)
+                return i;
+        }
+        return -1;
+    }
+    // handle creat
+    private int handleCreat(int positionOfName){
+        String fileName = readVirtualMemoryString(positionOfName, 256);
+        //falta ver si es valido
+        //ver si ya esta abierto
+        for (int i = 0 ;i< this.openFiles.length; i++) {
+            if(this.openFiles[i] != null && this.openFiles[i].getName().equals(fileName))
+                return i;
+        }
+        //indice en donde hay espacio libre
+        int index = getFreeSpace();
+        if(index != -1){
+            OpenFile file = ThreadedKernel.fileSystem.open(fileName, true);
+            this.openFiles[index] = file;
+        }
+        return index;
+    }
+    private int handleOpen( int positionOfName){
+        String fileName = readVirtualMemoryString(positionOfName, 256);
+        //falta ver si es valido
+        //ver si ya esta abierto
+        for (int i = 0 ;i< this.openFiles.length; i++) {
+            if(this.openFiles[i] != null && this.openFiles[i].getName().equals(fileName))
+                return i;
+        }
+        //indice en donde hay espacio libre
+        int index = getFreeSpace();
+        if(index != -1){
+            OpenFile file = ThreadedKernel.fileSystem.open(fileName, false);
+            this.openFiles[index] = file;
+        }
+        return index;
+    }
+    private int handleRead(int index, int bufferStart, int bytesCount){
+        OpenFile file = this.openFiles[index];
+        byte[] bytes = new byte[bytesCount];
+        //se lee la cantidad de bytes del archivo
+        int bytesRead = file.read(bytes, 0, bytesCount);
+        // se escribe en memoria virtual desde el inicio del buffer mandado hasta la cantidad de bytes a leer
+        int bytesWritten = writeVirtualMemory(bufferStart, bytes, 0, bytesRead);
+        return bytesWritten;
+    }
+    private int handleWrite(int index, int bufferStart, int bytesCount){
+        OpenFile file = this.openFiles[index];
+        byte[] bytes = new byte[bytesCount];
+        // se lee desde memoria virtual desde el inicio del buffer mandado hasta la cantidad de bytes a leer
+        int bytesRead = readVirtualMemory(bufferStart, bytes);
+        //se escribe en el archivo
+        int bytesWritten = file.write(bytes, 0, bytesRead);
+        return bytesWritten;
+    }
+    private int handleClose(int index){
+        OpenFile file = this.openFiles[index];
+        this.openFiles[index] = null;
+        file.close();
+        return 0;
+    }
+    /*
+    PARAMS: a0, es el address del filename    
+    */
+    public int handleUnlink(int a0){
+            System.out.println("Entro al unlink");
+            boolean returned = true;
+            String filename = readVirtualMemoryString(a0,256);
+            
+            System.out.println("El archivo es: " + filename);
 
-    /**
+            if(filename == null){
+                returned = false;
+            }
+            
+            boolean val=ThreadedKernel.fileSystem.remove(filename);
+            
+            if(returned){
+                return 0;
+            }
+            else{
+                return -1;
+            }
+    }
+    /**OpenFile file = this.openFiles[index];
+        byte[] bytes = new byte[bytesCount];
+        //se lee la cantidad de bytes que dijeron
+        int bytesRead = file.read(bytes, 0, bytesCount)
+        // se escribe en memoria virtual desde el inicio del buffer mandado hasta la cantidad de bytes a leer
+        int bytesWritten = file.writeVirtualMemory(bufferStart, bytes, 0, bytesRead)
+        return bytesWritten;
      * Handle the halt() system call. 
      */
     private int handleHalt() {
@@ -388,16 +485,27 @@ public class UserProcess {
      * @return	the value to be returned to the user.
      */
     public int handleSyscall(int syscall, int a0, int a1, int a2, int a3) {
-	switch (syscall) {
-	case syscallHalt:
-	    return handleHalt();
+    	switch (syscall) {
+    	case syscallHalt:
+    	    return handleHalt();
+        case syscallCreate:
+            return handleCreat(a0);
+        case syscallOpen:
+            return handleOpen(a0);
+        case syscallRead:
+            return handleRead(a0, a1, a2);
+        case syscallWrite:
+            return handleWrite(a0, a1, a2);
+        case syscallClose:
+            return handleClose(a0);
+        case syscallUnlink:
+            return handleUnlink(a0);
 
-
-	default:
-	    Lib.debug(dbgProcess, "Unknown syscall " + syscall);
-	    Lib.assertNotReached("Unknown system call!");
-	}
-	return 0;
+    	default:
+    	    Lib.debug(dbgProcess, "Unknown syscall " + syscall);
+    	    //Lib.assertNotReached("Unknown system call!");
+    	}
+    	return 0;
     }
 
     /**
