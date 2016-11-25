@@ -282,7 +282,10 @@ public class KThread {
      */
     public void join() {
 	Lib.debug(dbgThread, "Joining to thread: " + toString());
+/*    System.out.println("this " + this);
+    System.out.println(currentThread.compareTo(this));
 
+*/
 	Lib.assertTrue(this != currentThread);
 	//nuevo codigo
 	if(status == statusFinished){
@@ -633,7 +636,7 @@ public class KThread {
     /** Number of times the KThread constructor was called. */
     private static int numCreated = 0;
 
-    private ThreadQueue waitingQueue = ThreadedKernel.scheduler.newThreadQueue(false);
+    private ThreadQueue waitingQueue = ThreadedKernel.scheduler.newThreadQueue(false);;
     private static ThreadQueue readyQueue = null;
     private static KThread currentThread = null;
     private static KThread toBeDestroyed = null;

@@ -3,6 +3,7 @@ package nachos.userprog;
 import nachos.machine.*;
 import nachos.threads.*;
 import nachos.userprog.*;
+import java.util.*; 
 
 /**
  * A kernel that can support multiple user processes.
@@ -27,6 +28,10 @@ public class UserKernel extends ThreadedKernel {
 	Machine.processor().setExceptionHandler(new Runnable() {
 		public void run() { exceptionHandler(); }
 	    });
+    int numPhysPages = Machine.processor().getNumPhysPages();     
+    for(int i = 0; i < numPhysPages; i++)                                  
+        pageTable.add(i);                                         
+
     }
 
     /**
@@ -106,6 +111,56 @@ public class UserKernel extends ThreadedKernel {
     public void terminate() {
 	super.terminate();
     }
+    //metodo para regresar el numero de una pagina libre
+    public static int getFreePage(){
+        int pageNumber = -1;
+        Machine.interrupt().disable();
+        if(pageTable.isEmpty()== false){
+            pageNumber = pageTable.removeFirst();
+        }
+        Machine.interrupt().enabled();
+        return pageNumber;
+    }
+    //metodo para agregar una pagina nueva
+    public static void setFreePage(int number){
+        Lib.assertTrue(number<Machine.processor().getNumPhysPages());
+        Machine.interrupt().disable();
+        pageTable.add(number);
+        Machine.interrupt().enabled();
+    }
+    //obtener el siguiente id
+    public static int getNextPId(){
+        int ret;
+        Machine.interrupt().disable();
+        ret = pId++;
+        Machine.interrupt().enabled();
+        return ret;
+    }
+    public static UserProcess getProcessById(int id){
+        System.out.println(processList);
+        return processList.get(id);
+    }
+    public static UserProcess setProcess(int id, UserProcess process) {  
+        UserProcess ret;                              
+        Machine.interrupt().disable();                           
+        ret = processList.put(id, process);            
+        Machine.interrupt().enabled();                          
+        return ret;                                     
+    }
+    public static UserProcess removeProcess(int id) {  
+        UserProcess ret;                              
+        Machine.interrupt().disable();                           
+        ret = processList.remove(id);            
+        Machine.interrupt().enabled();                          
+        return ret;                                     
+    }
+    // lista de physical pages libres
+    private static LinkedList<Integer> pageTable = new LinkedList<Integer>();
+
+    //id del proximo proceso 
+    private static int pId;
+    //array de los procesos con su respectivo pId 
+    private static HashMap<Integer, UserProcess>  processList = new HashMap<Integer, UserProcess>();
 
     /** Globally accessible reference to the synchronized console. */
     public static SynchConsole console;

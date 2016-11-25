@@ -5,6 +5,7 @@ import nachos.threads.*;
 import nachos.userprog.*;
 
 import java.io.EOFException;
+import java.util.*; 
 
 /**
  * Encapsulates the state of a user process that is not contained in its
@@ -32,6 +33,8 @@ public class UserProcess {
 	pageTable = new TranslationEntry[numPhysPages];
 	for (int i=0; i<numPhysPages; i++)
 	    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
+    //agregar este proceso a la lista de procesos
+    UserKernel.setProcess(UserKernel.getNextPId(), this);
     }
     
     /**
@@ -56,8 +59,9 @@ public class UserProcess {
     public boolean execute(String name, String[] args) {
 	if (!load(name, args))
 	    return false;
-	
-	new UThread(this).setName(name).fork();
+	//settearlo a la variable que creamos
+	thread = new UThread(this);
+    thread.setName(name).fork();
 
 	return true;
     }
@@ -132,18 +136,34 @@ public class UserProcess {
      *			the array.
      * @return	the number of bytes successfully transferred.
      */
-    public int readVirtualMemory(int vaddr, byte[] data, int offset,
-				 int length) {
+    public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
 	Lib.assertTrue(offset >= 0 && length >= 0 && offset+length <= data.length);
-
+    //la memoria de cada proceso
 	byte[] memory = Machine.processor().getMemory();
-	
-	// for now, just assume that virtual addresses equal physical addresses
-	if (vaddr < 0 || vaddr >= memory.length)
-	    return 0;
 
-	int amount = Math.min(length, memory.length-vaddr);
-	System.arraycopy(memory, vaddr, data, offset, amount);
+        Processor procesador = Machine.processor();
+        //metodos que ya existen en processor
+        int vpn = procesador.pageFromAddress(vaddr);
+        
+        //la variable de la pagina para traducir de virtual a  fisica
+        TranslationEntry pagina = pageTable[vpn];
+        //ponemos la variable used a true como dice la documentacion de TranslationEntry
+        pagina.used = true;
+        int ppn = pagina.ppn;
+
+        int virtualOffset = procesador.offsetFromAddress(vaddr);
+        //la cantidad de paginas por su tama;o mas el offset virtual es la traduccion para la direccion fisica
+        int physicalAddress = (ppn*pageSize)+virtualOffset;
+
+        if( ppn > procesador.getNumPhysPages() || ppn<0){
+            System.out.println("Physical page number out of range!");
+            return 0;
+        }
+        //cambiamos a physicalAddress porque antes la virtual era la misma que la fisica 
+        //ahora es diferente porque leemos de la virtual a la fisica
+    	int amount = Math.min(length, memory.length-physicalAddress);
+        // arraycopy(src,srcPos, dest, destPos, length)
+    	System.arraycopy(memory, physicalAddress, data, offset, amount);
 
 	return amount;
     }
@@ -185,9 +205,34 @@ public class UserProcess {
 	if (vaddr < 0 || vaddr >= memory.length)
 	    return 0;
 
+        Processor procesador = Machine.processor();
+        //metodos que ya existen en processor
+        int vpn = procesador.pageFromAddress(vaddr);
+        //la variable de la pagina para traducir de virtual a  fisica
+        TranslationEntry pagina = pageTable[vpn];
+        //ponemos la variable used a true como dice la documentacion de TranslationEntry
+        pagina.used = true;
+        //ponemos la variable dirty tambien dicho en TranslationEntry
+        pagina.dirty = true;
+        //si es readonly es error
+        if(pagina.readOnly){
+            System.out.println("Page is read only!");
+            return 0;
+        }
+        int ppn = pagina.ppn;
+
+        int virtualOffset = procesador.offsetFromAddress(vaddr);
+        //la cantidad de paginas por su tama;o mas el offset virtual es la traduccion para la direccion fisica
+        int physicalAddress = (ppn*pageSize)+virtualOffset;
+
+        if( ppn > procesador.getNumPhysPages() || ppn<0){
+            System.out.println("Physical page number out of range!");
+            return 0;
+        }
+    // este no se cambia porque si se copia de la memoria virtual
 	int amount = Math.min(length, memory.length-vaddr);
 	System.arraycopy(data, offset, memory, vaddr, amount);
-
+        //System.out.println("Copied amount: "+amount);
 	return amount;
     }
 
@@ -255,6 +300,13 @@ public class UserProcess {
 	// and finally reserve 1 page for arguments
 	numPages++;
 
+        // instanciar la pageTable con la cantidad de paginas que necesita el coff
+        pageTable = new TranslationEntry[numPages]; 
+        for (int i = 0; i < numPages; i++) {                                               
+            int ppn = UserKernel.getFreePage(); 
+            pageTable[i] =  new TranslationEntry(i, ppn, true, false, false, false);       
+        } 
+
 	if (!loadSections())
 	    return false;
 
@@ -293,20 +345,24 @@ public class UserProcess {
 	    return false;
 	}
 
-	// load sections
-	for (int s=0; s<coff.getNumSections(); s++) {
-	    CoffSection section = coff.getSection(s);
-	    
-	    Lib.debug(dbgProcess, "\tinitializing " + section.getName()
-		      + " section (" + section.getLength() + " pages)");
+    	// load sections
+    	for (int s=0; s<coff.getNumSections(); s++) {
+    	    CoffSection section = coff.getSection(s);
+    	    
+    	    Lib.debug(dbgProcess, "\tinitializing " + section.getName()
+    		      + " section (" + section.getLength() + " pages)");
 
-	    for (int i=0; i<section.getLength(); i++) {
-		int vpn = section.getFirstVPN()+i;
-
-		// for now, just assume virtual addresses=physical addresses
-		section.loadPage(i, vpn);
-	    }
-	}
+    	    for (int i=0; i<section.getLength(); i++) {
+        		int vpn = section.getFirstVPN()+i;
+                //vamos a cargar la pagina de la virtual memory 
+                // y vamos a agarrar su ppn para hacer luego el loadPage ya con este ppn y no vpn
+                TranslationEntry pagina = pageTable[vpn];
+                pagina.readOnly = section.isReadOnly();
+                int ppn = pagina.ppn;
+        		// ahora se carga la physical no la virtual 
+        		section.loadPage(i, ppn);
+    	    }
+    	}
 	
 	return true;
     }
@@ -315,6 +371,13 @@ public class UserProcess {
      * Release any resources allocated by <tt>loadSections()</tt>.
      */
     protected void unloadSections() {
+        //liberar todas las paginas que ya fueron usadas;
+        //si se pone valid igual a false se pueden usar, como dice en TranslationEntry
+        for (int i = 0; i < numPages;i++) {
+            UserKernel.setFreePage(pageTable[i].ppn);
+            pageTable[i].valid = false;
+            
+        }
     }    
 
     /**
@@ -426,6 +489,108 @@ public class UserProcess {
                 return -1;
             }
     }
+    // cerrar el proceso
+    public void handleExit(int status){
+        // se cierran todos los archivos abiertos del proceso
+        for (int i = 0; i< 16 ;i++ ) {
+            if(openFiles[i] != null){
+                handleClose(i);
+            }
+        }
+        // se settea a todos los procesos hijos el id 1 del proceso principal
+        while(childProcesses != null && !childProcesses.isEmpty()){
+            int cId = childProcesses.removeFirst();
+            UserProcess cProcess = UserKernel.getProcessById(cId);
+            cProcess.parentId = 1;
+        }
+        //poner el status general al status que mando el llamado de la funcion
+        exitStatus = status;
+        //liberar la memoria que uso el proceso (las pages)
+        unloadSections();
+        //terminar si es el proceso principal
+        if(this.pId == 1){
+            Kernel.kernel.terminate();
+        }else{//sino es solo cerrar el thread actual
+            KThread.currentThread().finish();
+        }
+
+    }
+    //hacer el join del proceso hijo
+    public int handleJoin(int processId, int status){
+        boolean found = false;
+        //ver si el proceso esta entre los procesos hijos del proceso padre
+        for (int i = 0;i<childProcesses.size() ;i++ ) {
+            if(processId == childProcesses.get(i)){
+                childProcesses.remove(i);
+                found = true;
+            }
+        }
+        if(!found){
+            System.out.println("Process: "+ pId + " doesn't have child: "+processId+"!");
+            return -1;
+        }
+        //hacer join al proceso hijo
+        UserProcess childProcess = UserKernel.getProcessById(processId);
+
+        childProcess.thread.join();
+        //quitar el proceso de la lista de procesos
+        UserKernel.removeProcess(processId);
+        //
+        byte temp[] = new byte[4];                                         
+        temp=Lib.bytesFromInt(childProcess.exitStatus);                    
+        int cntBytes = writeVirtualMemory(status, temp);                
+        if (cntBytes != 4)                                                 
+            return 1;                                                      
+        else                                                               
+           return 0;
+
+    }
+    //argc es el numero de parametros
+    //argv puntero donde inician los parametros
+    private int handleExec(int file, int argc, int argv) { 
+        // argc es el numero de parametros a pasarle al hijo
+        if( argc <1 ){
+            System.out.println("argc < 1");
+            return -1;
+        }
+        // el archivo tiene que tener ".coff"
+        String filename = readVirtualMemoryString(file, 256);
+        System.out.println(filename );
+        if(filename == null){
+            System.out.println("null filename!");
+        }
+        String cff = filename.substring(filename.length()-4, filename.length());
+        if(cff.equals(".coff")){
+            System.out.println("Wrong extension!");
+        }
+        // get the parameters of the child process
+        String args[] = new String[argc];
+        byte temp[] = new byte[4];
+        for (int i = 0; i<argc ;i++) {
+            //ver si la cantidad de bytes esta bien en el parametro
+            //se lee el parametro y se pone en temp
+            int bytes = readVirtualMemory(argv+i*4, temp);
+            if(bytes != 4)
+                return -1;
+            // se transforma el temp a int para poderlo leer en readVirtualMemoryString
+            int stringAddress = Lib.bytesToInt(temp, 0);
+            // se guarda el parametro en la lista de parametros
+            args[i] = readVirtualMemoryString(stringAddress, 256);
+
+        }
+        //crear el proceso hijo
+        UserProcess process = UserProcess.newUserProcess();
+        //seteamos el id del padre del hijo como el id actual
+        process.parentId = this.pId;
+        //agregamos a la lista de hijos
+        childProcesses.add(process.pId);
+        boolean ret = process.execute(filename, args);
+        if(ret)
+            return process.pId;
+        else
+            return -1;
+
+    }
     /**OpenFile file = this.openFiles[index];
         byte[] bytes = new byte[bytesCount];
         //se lee la cantidad de bytes que dijeron
@@ -500,7 +665,13 @@ public class UserProcess {
             return handleClose(a0);
         case syscallUnlink:
             return handleUnlink(a0);
-
+        case syscallExit:
+            handleExit(a0);
+            return 0;
+        //case syscallJoin:
+            //return handleJoin(a0, a1);
+        case syscallExec:
+            return handleExec(a0, a1, a2);
     	default:
     	    Lib.debug(dbgProcess, "Unknown syscall " + syscall);
     	    //Lib.assertNotReached("Unknown system call!");
@@ -534,6 +705,7 @@ public class UserProcess {
 	default:
 	    Lib.debug(dbgProcess, "Unexpected exception: " +
 		      Processor.exceptionNames[cause]);
+        handleExit(-1);
 	    Lib.assertNotReached("Unexpected exception");
 	}
     }
@@ -554,4 +726,9 @@ public class UserProcess {
 	
     private static final int pageSize = Processor.pageSize;
     private static final char dbgProcess = 'a';
+    public int pId;
+    private int parentId;
+    private LinkedList<Integer> childProcesses = new LinkedList<Integer>();
+    private int exitStatus;
+    private UThread thread;
 }
